@@ -19,6 +19,7 @@ async-timeout
 attrs
 babel
 beautifulsoup4
+bert-score
 blake3
 bleach
 cachetools
