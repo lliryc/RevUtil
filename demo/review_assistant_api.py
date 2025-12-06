@@ -6,14 +6,14 @@ import time
 import uuid
 from typing import Any, Dict, List, Literal, Optional
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, PositiveInt
 
 from inference_engine_V2 import DemoConfig, RevUtilEngine
 import uvicorn
-
-app = FastAPI(title="Revas Review Assistant API", root_path="/get_comments", version="0.1.0")
 
 # ----------------------------
 # Config 
@@ -23,9 +23,54 @@ LLM_MODEL = "k-chirkunov/RevUtil_merged_model"
 MAX_BATCH = 128
 MAX_TEXT_CHARS = 20000
 MAX_CONCURRENT_WORKERS = 4  # Limit concurrent job processing
+JOB_TTL_SECONDS = 24 * 60 * 60  # 1 day in seconds
+CLEANUP_INTERVAL_SECONDS = 60 * 60  # Run cleanup every hour
 
 # In-memory job store (job_id -> job dict)
 JOBS: Dict[str, Dict[str, Any]] = {}
+
+
+async def _cleanup_expired_jobs():
+    """Remove jobs older than JOB_TTL_SECONDS."""
+    current_time = time.time()
+    expired_job_ids = [
+        job_id
+        for job_id, job in JOBS.items()
+        if current_time - job.get("created_at", 0) > JOB_TTL_SECONDS
+    ]
+    for job_id in expired_job_ids:
+        JOBS.pop(job_id, None)
+    if expired_job_ids:
+        print(f"Cleaned up {len(expired_job_ids)} expired job(s)")
+
+
+async def _cleanup_worker():
+    """Background task that periodically cleans up expired jobs."""
+    while True:
+        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+        await _cleanup_expired_jobs()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan: start cleanup task on startup."""
+    # Start cleanup task
+    cleanup_task = asyncio.create_task(_cleanup_worker())
+    yield
+    # Cleanup on shutdown
+    cleanup_task.cancel()
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+
+
+app = FastAPI(
+    title="Revas Review Assistant API",
+    root_path="/get_comments",
+    version="0.1.0",
+    lifespan=lifespan,
+)
 
 # Worker pool semaphore to limit concurrent job processing
 # Initialized lazily on first use (FastAPI ensures event loop exists)
@@ -253,4 +298,4 @@ def job_status(job_id: str):
     return job
   
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8888)
