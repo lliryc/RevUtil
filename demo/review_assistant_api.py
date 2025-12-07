@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Literal, Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field, PositiveInt
 
@@ -70,6 +71,14 @@ app = FastAPI(
     root_path="/get_comments",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Worker pool semaphore to limit concurrent job processing
